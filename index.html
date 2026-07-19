@@ -568,9 +568,11 @@ function renderResult(){
     <div class="result-label">정답률 ${pct}%</div>
     <div class="result-actions">
       <button class="btn" id="retry-btn">다시 풀기</button>
+      <button class="btn ghost" id="home-btn">다른 주제 선택</button>
     </div>
   `;
   document.getElementById('retry-btn').addEventListener('click', startQuiz);
+  document.getElementById('home-btn').addEventListener('click', renderSelector);
 }
 
 loadQuiz();
