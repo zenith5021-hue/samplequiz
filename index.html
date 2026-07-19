@@ -214,6 +214,28 @@
     font-size:0.8rem;
   }
 
+  .selector-form{
+    display:flex;
+    flex-direction:column;
+    align-items:stretch;
+    gap:12px;
+    max-width:320px;
+    margin:14px auto 0;
+  }
+  .sel-input{
+    background:var(--board-dark);
+    color:var(--chalk-white);
+    border:2px dashed rgba(245,243,232,0.45);
+    border-radius:8px;
+    font-family:'Nanum Gothic', sans-serif;
+    font-size:1rem;
+    font-weight:700;
+    padding:11px 12px;
+    outline:none;
+    appearance:none;
+  }
+  .sel-input:focus{border-color:var(--chalk-yellow);}
+
   .result-score{
     font-family:'Gaegu', cursive;
     font-size:3rem;
@@ -268,6 +290,7 @@ const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQYOcU9_i
 
 const contentEl = document.getElementById('content');
 
+let allQuiz = [];
 let quiz = [];
 let order = [];
 let idx = 0;
@@ -323,7 +346,10 @@ async function loadQuiz(){
     if(!res.ok) throw new Error("시트 응답 오류 (" + res.status + ")");
     const text = await res.text();
     const parsed = Papa.parse(text, {header:true, skipEmptyLines:true});
-    quiz = parsed.data.map(row => ({
+    allQuiz = parsed.data.map(row => ({
+      grade: (row['학년']||'').trim(),
+      semester: (row['학기']||'').trim(),
+      unit: (row['단원']||'').trim(),
       type: (row['유형']||'').trim(),
       question: (row['문제']||'').trim(),
       choices: [row['선택지1'],row['선택지2'],row['선택지3'],row['선택지4']]
@@ -332,14 +358,105 @@ async function loadQuiz(){
       explanation: (row['해설']||'').trim()
     })).filter(q => q.question && q.answer);
 
-    if(quiz.length === 0){
-      renderError("시트에서 문제를 하나도 찾지 못했어요. 열 이름(유형/문제/선택지1~4/정답/해설)을 확인해주세요.");
+    if(allQuiz.length === 0){
+      renderError("시트에서 문제를 하나도 찾지 못했어요. 열 이름(학년/학기/단원/유형/문제/선택지1~4/정답/해설)을 확인해주세요.");
       return;
     }
-    startQuiz();
+    renderSelector();
   }catch(e){
     renderError(e.message + " — 시트가 '웹에 게시' 상태인지, 주소가 정확한지 확인해주세요.");
   }
+}
+
+function uniqueValues(list, key){
+  return [...new Set(list.map(q => q[key]).filter(Boolean))].sort();
+}
+
+function renderSelector(){
+  const hasGrade = allQuiz.some(q => q.grade);
+  const hasSemester = allQuiz.some(q => q.semester);
+  const hasUnit = allQuiz.some(q => q.unit);
+
+  if(!hasGrade && !hasSemester && !hasUnit){
+    quiz = allQuiz;
+    startQuiz();
+    return;
+  }
+
+  function optionsHtml(values, placeholder){
+    return `<option value="">${placeholder}</option>` +
+      values.map(v => `<option value="${v}">${v}</option>`).join('');
+  }
+
+  contentEl.innerHTML = `
+    <div class="center-msg" style="margin-bottom:6px;">🖍️ 어떤 문제를 풀어볼까요?</div>
+    <div class="selector-form">
+      ${hasGrade ? `<select id="sel-grade" class="sel-input"><option value="">학년 선택</option></select>` : ''}
+      ${hasSemester ? `<select id="sel-semester" class="sel-input"><option value="">학기 선택</option></select>` : ''}
+      ${hasUnit ? `<select id="sel-unit" class="sel-input"><option value="">단원 선택</option></select>` : ''}
+      <button class="btn" id="sel-start" style="margin-top:14px;" disabled>시작하기</button>
+      <div class="sub" id="sel-msg" style="margin-top:10px;"></div>
+    </div>
+  `;
+
+  const gradeEl = document.getElementById('sel-grade');
+  const semEl = document.getElementById('sel-semester');
+  const unitEl = document.getElementById('sel-unit');
+  const startBtn = document.getElementById('sel-start');
+  const msgEl = document.getElementById('sel-msg');
+
+  function refreshSemesterOptions(){
+    if(!semEl) return;
+    const pool = hasGrade && gradeEl.value ? allQuiz.filter(q => q.grade === gradeEl.value) : allQuiz;
+    const prev = semEl.value;
+    semEl.innerHTML = optionsHtml(uniqueValues(pool, 'semester'), '학기 선택');
+    if([...semEl.options].some(o => o.value === prev)) semEl.value = prev;
+  }
+
+  function refreshUnitOptions(){
+    if(!unitEl) return;
+    let pool = allQuiz;
+    if(hasGrade && gradeEl.value) pool = pool.filter(q => q.grade === gradeEl.value);
+    if(hasSemester && semEl.value) pool = pool.filter(q => q.semester === semEl.value);
+    const prev = unitEl.value;
+    unitEl.innerHTML = optionsHtml(uniqueValues(pool, 'unit'), '단원 선택');
+    if([...unitEl.options].some(o => o.value === prev)) unitEl.value = prev;
+  }
+
+  function refreshStartState(){
+    const requiredFilled =
+      (!hasGrade || gradeEl.value) &&
+      (!hasSemester || semEl.value) &&
+      (!hasUnit || unitEl.value);
+    startBtn.disabled = !requiredFilled;
+  }
+
+  if(gradeEl){
+    gradeEl.innerHTML = optionsHtml(uniqueValues(allQuiz, 'grade'), '학년 선택');
+    gradeEl.addEventListener('change', () => { refreshSemesterOptions(); refreshUnitOptions(); refreshStartState(); });
+  }
+  if(semEl){
+    refreshSemesterOptions();
+    semEl.addEventListener('change', () => { refreshUnitOptions(); refreshStartState(); });
+  }
+  if(unitEl){
+    refreshUnitOptions();
+    unitEl.addEventListener('change', refreshStartState);
+  }
+
+  startBtn.addEventListener('click', () => {
+    const filtered = allQuiz.filter(q =>
+      (!hasGrade || !gradeEl.value || q.grade === gradeEl.value) &&
+      (!hasSemester || !semEl.value || q.semester === semEl.value) &&
+      (!hasUnit || !unitEl.value || q.unit === unitEl.value)
+    );
+    if(filtered.length === 0){
+      msgEl.textContent = '해당 조건의 문제가 없어요. 다른 조합을 선택해주세요.';
+      return;
+    }
+    quiz = filtered;
+    startQuiz();
+  });
 }
 
 function startQuiz(){
